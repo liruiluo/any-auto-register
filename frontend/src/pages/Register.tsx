@@ -54,6 +54,29 @@ export default function Register() {
         luckmail_api_key: cfg.luckmail_api_key || '',
         luckmail_email_type: cfg.luckmail_email_type || '',
         luckmail_domain: cfg.luckmail_domain || '',
+        outlook_official_pool_secret: cfg.outlook_official_pool_secret || '',
+        outlook_official_login_slug: cfg.outlook_official_login_slug || '',
+        outlook_official_base_email: cfg.outlook_official_base_email || '',
+        outlook_official_alias_mode: cfg.outlook_official_alias_mode || 'official',
+        outlook_official_alias_prefix: cfg.outlook_official_alias_prefix || 'aar',
+        outlook_official_target_email: cfg.outlook_official_target_email || '',
+        outlook_official_poll_interval: cfg.outlook_official_poll_interval || 5,
+        outlook_official_timeout: cfg.outlook_official_timeout || 60,
+        outlook_email_base_url: cfg.outlook_email_base_url || '',
+        outlook_email_auth_mode: cfg.outlook_email_auth_mode || 'auto',
+        outlook_email_api_key: cfg.outlook_email_api_key || '',
+        outlook_email_login_password: cfg.outlook_email_login_password || '',
+        outlook_email_group_id: cfg.outlook_email_group_id || '',
+        outlook_email_address_mode: cfg.outlook_email_address_mode || 'aliases-first',
+        outlook_email_address_pool: cfg.outlook_email_address_pool || '',
+        outlook_email_folder: cfg.outlook_email_folder || 'all',
+        outlook_email_fetch_top: cfg.outlook_email_fetch_top || 10,
+        outlook_email_disable_used_accounts: cfg.outlook_email_disable_used_accounts || 'true',
+        outlook_email_disable_used_status: cfg.outlook_email_disable_used_status || 'inactive',
+        outlook_email_used_addresses_path: cfg.outlook_email_used_addresses_path || '',
+        outlook_email_poll_interval: cfg.outlook_email_poll_interval || 5,
+        outlook_email_timeout: cfg.outlook_email_timeout || 60,
+        outlook_email_proxy: cfg.outlook_email_proxy || '',
       })
     })
   }, [form])
@@ -92,6 +115,29 @@ export default function Register() {
           luckmail_api_key: values.luckmail_api_key,
           luckmail_email_type: values.luckmail_email_type,
           luckmail_domain: values.luckmail_domain,
+          outlook_official_pool_secret: values.outlook_official_pool_secret,
+          outlook_official_login_slug: values.outlook_official_login_slug,
+          outlook_official_base_email: values.outlook_official_base_email,
+          outlook_official_alias_mode: values.outlook_official_alias_mode,
+          outlook_official_alias_prefix: values.outlook_official_alias_prefix,
+          outlook_official_target_email: values.outlook_official_target_email,
+          outlook_official_poll_interval: values.outlook_official_poll_interval,
+          outlook_official_timeout: values.outlook_official_timeout,
+          outlook_email_base_url: values.outlook_email_base_url,
+          outlook_email_auth_mode: values.outlook_email_auth_mode,
+          outlook_email_api_key: values.outlook_email_api_key,
+          outlook_email_login_password: values.outlook_email_login_password,
+          outlook_email_group_id: values.outlook_email_group_id,
+          outlook_email_address_mode: values.outlook_email_address_mode,
+          outlook_email_address_pool: values.outlook_email_address_pool,
+          outlook_email_folder: values.outlook_email_folder,
+          outlook_email_fetch_top: values.outlook_email_fetch_top,
+          outlook_email_disable_used_accounts: values.outlook_email_disable_used_accounts,
+          outlook_email_disable_used_status: values.outlook_email_disable_used_status,
+          outlook_email_used_addresses_path: values.outlook_email_used_addresses_path,
+          outlook_email_poll_interval: values.outlook_email_poll_interval,
+          outlook_email_timeout: values.outlook_email_timeout,
+          outlook_email_proxy: values.outlook_email_proxy,
           yescaptcha_key: values.yescaptcha_key,
           solver_url: values.solver_url,
         },
@@ -197,6 +243,8 @@ export default function Register() {
                 { value: 'laoudo', label: 'Laoudo' },
                 { value: 'cfworker', label: 'CF Worker' },
                 { value: 'luckmail', label: 'LuckMail' },
+                { value: 'outlook_official_web', label: 'Official Outlook Web' },
+                { value: 'outlookapi', label: 'Outlook API' },
               ]}
             />
           </Form.Item>
@@ -242,6 +290,83 @@ export default function Register() {
               </Form.Item>
               <Form.Item name="luckmail_domain" label="邮箱域名（可选）">
                 <Input placeholder="outlook.com" />
+              </Form.Item>
+            </>
+          )}
+          {mailProvider === 'outlook_official_web' && (
+            <>
+              <Form.Item name="outlook_official_pool_secret" label="Pool Secret 路径">
+                <Input placeholder="/home/.../pool.json" />
+              </Form.Item>
+              <Form.Item name="outlook_official_login_slug" label="登录 slug（可选）">
+                <Input.Password placeholder="base@outlook.com----password" />
+              </Form.Item>
+              <Form.Item name="outlook_official_base_email" label="基础 Outlook 邮箱">
+                <Input placeholder="base@outlook.com" />
+              </Form.Item>
+              <Form.Item name="outlook_official_alias_mode" label="Alias 模式">
+                <Input placeholder="official / base / fixed" />
+              </Form.Item>
+              <Form.Item name="outlook_official_alias_prefix" label="Alias 前缀">
+                <Input placeholder="aar" />
+              </Form.Item>
+              <Form.Item name="outlook_official_target_email" label="固定目标邮箱（可选）">
+                <Input placeholder="customalias@outlook.com" />
+              </Form.Item>
+              <Form.Item name="outlook_official_poll_interval" label="轮询间隔（秒）">
+                <InputNumber min={1} style={{ width: '100%' }} />
+              </Form.Item>
+              <Form.Item name="outlook_official_timeout" label="超时（秒）">
+                <InputNumber min={10} style={{ width: '100%' }} />
+              </Form.Item>
+            </>
+          )}
+          {mailProvider === 'outlookapi' && (
+            <>
+              <Form.Item name="outlook_email_base_url" label="API Base URL">
+                <Input placeholder="http://127.0.0.1:5000" />
+              </Form.Item>
+              <Form.Item name="outlook_email_auth_mode" label="认证模式">
+                <Input placeholder="auto / external / internal" />
+              </Form.Item>
+              <Form.Item name="outlook_email_api_key" label="External API Key（可选）">
+                <Input.Password placeholder="api_key" />
+              </Form.Item>
+              <Form.Item name="outlook_email_login_password" label="Internal Login Password（可选）">
+                <Input.Password placeholder="password" />
+              </Form.Item>
+              <Form.Item name="outlook_email_group_id" label="Group ID（可选）">
+                <Input placeholder="1" />
+              </Form.Item>
+              <Form.Item name="outlook_email_address_mode" label="地址策略">
+                <Input placeholder="aliases-first / primary-first / aliases-only / primary-only" />
+              </Form.Item>
+              <Form.Item name="outlook_email_address_pool" label="固定地址池（可选）">
+                <Input.TextArea rows={3} placeholder="a@outlook.com,b@outlook.com" />
+              </Form.Item>
+              <Form.Item name="outlook_email_folder" label="Folder（可选）">
+                <Input placeholder="all" />
+              </Form.Item>
+              <Form.Item name="outlook_email_fetch_top" label="每次抓取条数">
+                <InputNumber min={1} max={50} style={{ width: '100%' }} />
+              </Form.Item>
+              <Form.Item name="outlook_email_disable_used_accounts" label="用后禁用">
+                <Input placeholder="true / false" />
+              </Form.Item>
+              <Form.Item name="outlook_email_disable_used_status" label="禁用状态">
+                <Input placeholder="inactive" />
+              </Form.Item>
+              <Form.Item name="outlook_email_used_addresses_path" label="已用地址 ledger 路径">
+                <Input placeholder="/home/.../outlook-email-used-addresses.json" />
+              </Form.Item>
+              <Form.Item name="outlook_email_poll_interval" label="轮询间隔（秒）">
+                <InputNumber min={1} style={{ width: '100%' }} />
+              </Form.Item>
+              <Form.Item name="outlook_email_timeout" label="超时（秒）">
+                <InputNumber min={5} style={{ width: '100%' }} />
+              </Form.Item>
+              <Form.Item name="outlook_email_proxy" label="代理（可选）">
+                <Input placeholder="http://127.0.0.1:7890" />
               </Form.Item>
             </>
           )}
