@@ -293,6 +293,24 @@ class ChatGPTClient:
             names.append(str(cookie.name or ""))
         return sorted(set(name for name in names if name))
 
+    def _get_chunked_cookie_value(self, base_name, domain_hint=None):
+        chunks = []
+        prefix = f"{base_name}."
+        for cookie in self.session.cookies.jar:
+            if domain_hint and domain_hint not in (cookie.domain or ""):
+                continue
+            name = str(cookie.name or "")
+            if not name.startswith(prefix):
+                continue
+            suffix = name[len(prefix):]
+            if not suffix.isdigit():
+                continue
+            chunks.append((int(suffix), cookie.value))
+        if not chunks:
+            return ""
+        chunks.sort(key=lambda item: item[0])
+        return "".join(value for _index, value in chunks)
+
     def get_next_auth_session_token(self):
         """获取 ChatGPT next-auth 会话 Cookie。"""
         candidates = [
@@ -307,6 +325,10 @@ class ChatGPTClient:
             if value:
                 self._last_session_cookie_name = name
                 return value
+            chunked = self._get_chunked_cookie_value(name, "chatgpt.com")
+            if chunked:
+                self._last_session_cookie_name = f"{name}.*"
+                return chunked
         return ""
 
     def fetch_chatgpt_session(self):
