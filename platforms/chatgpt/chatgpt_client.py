@@ -872,6 +872,9 @@ class ChatGPTClient:
 
             if self._state_is_email_otp(state):
                 self._log("等待邮箱验证码...")
+                if self.email_otp_sent_at is None:
+                    self.email_otp_sent_at = time.time()
+                    self._log("首次进入 email-verification，记录 OTP 观察起点")
                 otp_code = skymail_client.wait_for_verification_code(
                     email,
                     timeout=30,
