@@ -115,6 +115,7 @@ def _run_register(task_id: str, req: RegisterTaskRequest):
 
         def _do_one(i: int):
             nonlocal next_start_time
+            _mailbox = None
             try:
                 from core.proxy_pool import proxy_pool
 
@@ -184,6 +185,14 @@ def _run_register(task_id: str, req: RegisterTaskRequest):
                 _log(task_id, f"✗ 注册失败: {e}")
                 _save_task_log(req.platform, req.email or "", "failed", error=str(e))
                 return str(e)
+            finally:
+                if _mailbox is not None:
+                    try:
+                        close = getattr(_mailbox, "close", None)
+                        if callable(close):
+                            close()
+                    except Exception as close_exc:
+                        _log(task_id, f"关闭邮箱资源失败: {close_exc}")
 
         from concurrent.futures import ThreadPoolExecutor, as_completed
         max_workers = min(req.concurrency, req.count, 5)

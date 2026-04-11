@@ -111,6 +111,7 @@ class ChatGPTClient:
         # 设置 oai-did cookie
         seed_oai_device_cookie(self.session, self.device_id)
         self.last_registration_state = FlowState()
+        self.email_otp_sent_at = None
     
     def _log(self, msg):
         """输出日志"""
@@ -591,6 +592,7 @@ class ChatGPTClient:
         url = f"{self.AUTH}/api/accounts/email-otp/send"
 
         try:
+            self.email_otp_sent_at = time.time()
             self._browser_pause()
             r = self.session.get(
                 url,
@@ -823,7 +825,11 @@ class ChatGPTClient:
 
             if self._state_is_email_otp(state):
                 self._log("等待邮箱验证码...")
-                otp_code = skymail_client.wait_for_verification_code(email, timeout=30)
+                otp_code = skymail_client.wait_for_verification_code(
+                    email,
+                    timeout=30,
+                    otp_sent_at=self.email_otp_sent_at,
+                )
                 if not otp_code:
                     return False, "未收到验证码"
 

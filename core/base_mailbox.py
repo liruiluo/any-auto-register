@@ -2482,10 +2482,14 @@ class OutlookApiMailbox(BaseMailbox):
         self.used_message_signatures: set[str] = set()
         self.used_address_map = load_used_address_map(self.used_addresses_path)
         self.current_reservation: Optional[dict[str, Any]] = None
+        self.message_detail_cache: dict[str, dict[str, Any]] = {}
         atexit.register(self.close)
 
     def close(self) -> None:
-        self._disable_reserved_account_if_needed()
+        reservation = self.current_reservation
+        self.current_reservation = None
+        self._disable_reserved_account_if_needed(reservation)
+        self._release_reserved_address(reservation)
         try:
             self.session.close()
         except Exception:
@@ -2741,11 +2745,18 @@ class OutlookApiMailbox(BaseMailbox):
         }
         save_used_address_map(self.used_addresses_path, self.used_address_map)
 
-    def _disable_reserved_account_if_needed(self) -> None:
+    def _release_reserved_address(self, reservation: Optional[dict[str, Any]]) -> None:
+        if not reservation:
+            return
+        normalized = str(reservation.get("address") or "").strip().lower()
+        if not normalized:
+            return
+        with outlook_api_claimed_addresses_lock:
+            outlook_api_claimed_addresses.discard(normalized)
+
+    def _disable_reserved_account_if_needed(self, reservation: Optional[dict[str, Any]]) -> None:
         if not self.disable_used_accounts:
             return
-        reservation = self.current_reservation
-        self.current_reservation = None
         if not reservation:
             return
         account_id = reservation.get("account_id")
@@ -2890,6 +2901,81 @@ class OutlookApiMailbox(BaseMailbox):
         search_text = self._message_search_text(message).lower()
         return any(keyword in search_text for keyword in OUTLOOK_API_OPENAI_KEYWORDS)
 
+    def _normalize_message_detail(self, payload: Any) -> dict[str, Any]:
+        if isinstance(payload, dict):
+            detail = payload.get("email")
+            if isinstance(detail, dict):
+                return detail
+            detail = payload.get("data")
+            if isinstance(detail, dict):
+                return detail
+            return payload
+        return {}
+
+    def _fetch_message_detail(
+        self,
+        account_email: str,
+        message_id: str,
+    ) -> dict[str, Any]:
+        normalized_message_id = str(message_id or "").strip()
+        if not normalized_message_id:
+            return {}
+        if normalized_message_id in self.message_detail_cache:
+            return self.message_detail_cache[normalized_message_id]
+
+        payload = self._request_json(
+            external_path=f"/api/external/messages/{quote(normalized_message_id, safe='')}",
+            internal_path=(
+                f"/api/email/{quote(str(account_email or '').strip(), safe='')}/"
+                f"{quote(normalized_message_id, safe='')}"
+            ),
+            query={
+                "email": str(account_email or "").strip(),
+                "folder": self.folder,
+            },
+        )
+        detail = self._normalize_message_detail(payload)
+        if detail:
+            self.message_detail_cache[normalized_message_id] = detail
+        return detail
+
+    def _message_matches_account(self, account_email: str, message: dict[str, Any]) -> bool:
+        raw_target = str(account_email or "").strip()
+        target = raw_target.lower()
+        if not target:
+            return True
+
+        recipients_raw = (
+            message.get("to_address")
+            or message.get("to")
+            or message.get("email_address")
+            or ""
+        )
+        message_id = str(message.get("id") or "").strip()
+        if not recipients_raw and message_id:
+            try:
+                detail = self._fetch_message_detail(raw_target, message_id)
+            except Exception as exc:
+                self._log(f"[OutlookApi] 获取邮件详情失败，跳过收件人校验: {exc}")
+                return True
+            if detail:
+                message.update(detail)
+                recipients_raw = (
+                    detail.get("to_address")
+                    or detail.get("to")
+                    or detail.get("email_address")
+                    or ""
+                )
+
+        recipients = {
+            item.strip().lower()
+            for item in re.split(r"[\s,;]+", str(recipients_raw or ""))
+            if item.strip()
+        }
+        if not recipients:
+            return True
+        return target in recipients
+
     def _is_message_fresh(self, message: dict[str, Any], otp_sent_at: Any) -> bool:
         if not otp_sent_at:
             return True
@@ -2960,6 +3046,8 @@ class OutlookApiMailbox(BaseMailbox):
 
                 candidate = (message_id, signature, code)
                 if self._looks_like_openai_mail(message):
+                    if not self._message_matches_account(account.email, message):
+                        continue
                     preferred.append(candidate)
                 else:
                     fallback.append(candidate)

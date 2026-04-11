@@ -56,7 +56,7 @@ class ChatGPTPlatform(BasePlatform):
                     self._acct = None
                     self._email = _fixed_email
                 def create_email(self, config=None):
-                    if self._email and self._acct and _fixed_email:
+                    if self._email and self._acct:
                         return {'email': self._email, 'service_id': self._acct.account_id, 'token': ''}
                     self._acct = _mailbox.get_email()
                     if not self._email:
