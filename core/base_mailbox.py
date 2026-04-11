@@ -2720,16 +2720,47 @@ class OutlookApiMailbox(BaseMailbox):
         return alias_candidates + primary_candidates
 
     def _fetch_messages(self, email: str) -> list[dict[str, Any]]:
-        payload = self._request_json(
-            external_path="/api/external/emails",
-            internal_path=f"/api/emails/{quote(str(email or '').strip())}",
-            query={
-                "email": str(email or "").strip(),
-                "folder": self.folder,
-                "top": self.fetch_top,
-            },
-        )
-        return normalize_outlook_api_messages(payload)
+        normalized_email = str(email or "").strip()
+        normalized_folder = str(self.folder or "inbox").strip().lower() or "inbox"
+        if normalized_folder in {"", "all", "auto"}:
+            folders = ["inbox", "junkemail", "deleteditems"]
+        else:
+            folders = [normalized_folder]
+
+        merged: list[dict[str, Any]] = []
+        seen_keys: set[str] = set()
+        for folder in folders:
+            payload = self._request_json(
+                external_path="/api/external/messages",
+                internal_path=f"/api/emails/{quote(normalized_email)}",
+                query={
+                    "email": normalized_email,
+                    "folder": folder,
+                    "top": self.fetch_top,
+                },
+            )
+            for message in normalize_outlook_api_messages(payload):
+                item = dict(message)
+                item.setdefault("folder", folder)
+                key = str(item.get("id") or "").strip() or self._message_signature(item)
+                if key in seen_keys:
+                    continue
+                seen_keys.add(key)
+                merged.append(item)
+
+        def sort_key(message: dict[str, Any]) -> int:
+            timestamp_ms, _precision_ms = parse_timestamp_info(
+                message.get("date")
+                or message.get("received_at")
+                or message.get("receivedAt")
+                or message.get("created_at")
+                or message.get("createdAt")
+                or message.get("timestamp")
+            )
+            return int(timestamp_ms or 0)
+
+        merged.sort(key=sort_key, reverse=True)
+        return merged
 
     def _remember_used_address(self, candidate: dict[str, Any]) -> None:
         if not self.disable_used_accounts or not self.used_addresses_path:
