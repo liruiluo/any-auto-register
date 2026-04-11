@@ -285,9 +285,29 @@ class ChatGPTClient:
             return cookie.value
         return ""
 
+    def _list_cookie_names(self, domain_hint=None):
+        names = []
+        for cookie in self.session.cookies.jar:
+            if domain_hint and domain_hint not in (cookie.domain or ""):
+                continue
+            names.append(str(cookie.name or ""))
+        return sorted(set(name for name in names if name))
+
     def get_next_auth_session_token(self):
         """获取 ChatGPT next-auth 会话 Cookie。"""
-        return self._get_cookie_value("__Secure-next-auth.session-token", "chatgpt.com")
+        candidates = [
+            "__Secure-next-auth.session-token",
+            "next-auth.session-token",
+            "__Secure-authjs.session-token",
+            "authjs.session-token",
+        ]
+        self._last_session_cookie_name = ""
+        for name in candidates:
+            value = self._get_cookie_value(name, "chatgpt.com")
+            if value:
+                self._last_session_cookie_name = name
+                return value
+        return ""
 
     def fetch_chatgpt_session(self):
         """请求 ChatGPT Session 接口并返回原始会话数据。"""
@@ -336,10 +356,15 @@ class ChatGPTClient:
         else:
             self._log("注册回调已落地，跳过额外跟随")
 
-        self._log("步骤 2/4: 检查 __Secure-next-auth.session-token ...")
+        self._log("步骤 2/4: 检查 ChatGPT session-token Cookie ...")
         session_cookie = self.get_next_auth_session_token()
         if not session_cookie:
-            return False, "缺少 __Secure-next-auth.session-token，注册回调可能未落地"
+            cookie_names = self._list_cookie_names("chatgpt.com")
+            if cookie_names:
+                self._log(f"chatgpt.com 当前 Cookie: {', '.join(cookie_names)}")
+            return False, "缺少 ChatGPT session-token Cookie，注册回调可能未落地"
+        cookie_name = getattr(self, "_last_session_cookie_name", "") or "session-token"
+        self._log(f"已命中 ChatGPT session Cookie: {cookie_name}")
 
         self._log("步骤 3/4: 请求 ChatGPT /api/auth/session ...")
         ok, session_or_error = self.fetch_chatgpt_session()
