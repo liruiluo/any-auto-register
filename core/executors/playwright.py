@@ -1,5 +1,10 @@
 """Playwright 执行器 - 支持 headless/headed 模式"""
 from ..base_executor import BaseExecutor, Response
+from platforms.chatgpt.playwright_display import (
+    fingerprint_context_overrides,
+    harden_playwright_context,
+    prepare_playwright_launch_kwargs,
+)
 
 
 class PlaywrightExecutor(BaseExecutor):
@@ -17,8 +22,14 @@ class PlaywrightExecutor(BaseExecutor):
         launch_opts = {"headless": self.headless}
         if self.proxy:
             launch_opts["proxy"] = {"server": self.proxy}
+        browser_mode = "headless" if self.headless else "headed"
+        launch_opts = prepare_playwright_launch_kwargs(
+            launch_opts,
+            browser_mode=browser_mode,
+        )
         self._browser = self._pw.chromium.launch(**launch_opts)
-        self._context = self._browser.new_context()
+        self._context = self._browser.new_context(**fingerprint_context_overrides())
+        harden_playwright_context(self._context)
         self._page = self._context.new_page()
 
     def get(self, url, *, headers=None, params=None) -> Response:
