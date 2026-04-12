@@ -44,6 +44,8 @@ class OAuthClient:
         self.proxy = proxy
         self.verbose = verbose
         self.browser_mode = browser_mode or "protocol"
+        self.last_passwordless_send_otp_error_code = ""
+        self.prefer_email_otp_first = False
         
         # 创建 session
         self.session = curl_requests.Session()
@@ -456,6 +458,72 @@ class OAuthClient:
             self._log(f"密码验证异常: {e}")
             return None
     
+    def _submit_passwordless_send_otp(
+        self,
+        email,
+        device_id,
+        *,
+        user_agent=None,
+        sec_ch_ua=None,
+        impersonate=None,
+        referer=None,
+        retries=3,
+    ):
+        """在 existing-account 恢复链中优先触发邮箱 OTP，而不是继续死磕旧密码。"""
+        self._log("步骤3: POST /api/accounts/passwordless/send-otp")
+        self.last_passwordless_send_otp_error_code = ""
+
+        request_url = f"{self.oauth_issuer}/api/accounts/passwordless/send-otp"
+        headers = self._headers(
+            request_url,
+            user_agent=user_agent,
+            sec_ch_ua=sec_ch_ua,
+            accept="application/json, text/plain, */*",
+            referer=referer or f"{self.oauth_issuer}/log-in/password",
+            origin=self.oauth_issuer,
+            content_type="application/json",
+            fetch_site="same-origin",
+            extra_headers={
+                "oai-device-id": device_id,
+            },
+        )
+        headers.update(generate_datadog_trace())
+
+        last_status = None
+        for attempt in range(1, max(1, int(retries or 1)) + 1):
+            try:
+                kwargs = {"headers": headers, "timeout": 30, "allow_redirects": False}
+                if impersonate:
+                    kwargs["impersonate"] = impersonate
+                self._browser_pause()
+                response = self.session.post(request_url, **kwargs)
+                last_status = response.status_code
+                self._log(f"/passwordless/send-otp -> {response.status_code} attempt={attempt}/{retries}")
+                if response.status_code == 200:
+                    self.last_passwordless_send_otp_error_code = ""
+                    return self._state_from_url(f"{self.oauth_issuer}/email-verification")
+                try:
+                    error_data = response.json()
+                except Exception:
+                    error_data = {}
+                error_code = str(((error_data or {}).get("error") or {}).get("code") or "").strip()
+                self.last_passwordless_send_otp_error_code = error_code
+                self._log(f"passwordless send-otp 失败: {response.text[:180]}")
+                if response.status_code >= 500 and attempt < retries:
+                    time.sleep(min(10, 2 * attempt))
+                    continue
+                return None
+            except Exception as exc:
+                self._log(f"passwordless send-otp 异常: {exc}")
+                self.last_passwordless_send_otp_error_code = ""
+                if attempt < retries:
+                    time.sleep(min(10, 2 * attempt))
+                    continue
+                break
+
+        self._log(f"passwordless send-otp 最终失败: status={last_status}")
+        return None
+
     def login_and_get_tokens(self, email, password, device_id, user_agent=None, sec_ch_ua=None, impersonate=None, skymail_client=None):
         """
         完整的 OAuth 登录流程，获取 tokens
@@ -544,14 +612,44 @@ class OAuthClient:
                 return tokens
 
             if self._state_is_login_password(state):
-                next_state = self._submit_password_verify(
-                    password,
-                    device_id,
-                    user_agent=user_agent,
-                    sec_ch_ua=sec_ch_ua,
-                    impersonate=impersonate,
-                    referer=state.current_url or state.continue_url or referer,
-                )
+                next_state = None
+                prefer_email_otp_first = bool(getattr(self, "prefer_email_otp_first", False))
+                if skymail_client and prefer_email_otp_first:
+                    self._log("检测到 login_password，按 prefer_email_otp_first 直接走 passwordless OTP")
+                    next_state = self._submit_passwordless_send_otp(
+                        email,
+                        device_id,
+                        user_agent=user_agent,
+                        sec_ch_ua=sec_ch_ua,
+                        impersonate=impersonate,
+                        referer=state.current_url or state.continue_url or referer,
+                    )
+                if not next_state and password:
+                    if prefer_email_otp_first:
+                        if self.last_passwordless_send_otp_error_code == "invalid_state":
+                            self._log("passwordless OTP 命中 invalid_state，停止回退旧密码以避免继续盲跑")
+                            return None
+                        self._log("passwordless OTP 未走通，回退尝试旧密码验证")
+                    else:
+                        self._log("检测到 login_password，优先尝试旧密码验证")
+                    next_state = self._submit_password_verify(
+                        password,
+                        device_id,
+                        user_agent=user_agent,
+                        sec_ch_ua=sec_ch_ua,
+                        impersonate=impersonate,
+                        referer=state.current_url or state.continue_url or referer,
+                    )
+                if not next_state and skymail_client and not prefer_email_otp_first:
+                    self._log("旧密码验证不可用，回退到 passwordless OTP")
+                    next_state = self._submit_passwordless_send_otp(
+                        email,
+                        device_id,
+                        user_agent=user_agent,
+                        sec_ch_ua=sec_ch_ua,
+                        impersonate=impersonate,
+                        referer=state.current_url or state.continue_url or referer,
+                    )
                 if not next_state:
                     return None
                 referer = state.current_url or referer
