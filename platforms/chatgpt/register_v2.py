@@ -71,6 +71,13 @@ class RegistrationEngineV2:
 
     def _should_retry(self, message: str) -> bool:
         text = str(message or "").lower()
+        non_retriable_markers = [
+            "user_already_exists",
+            "existing_account_after_about_you",
+        ]
+        if any(marker in text for marker in non_retriable_markers):
+            return False
+
         retriable_markers = [
             "tls",
             "ssl",

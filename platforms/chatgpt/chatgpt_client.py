@@ -764,10 +764,21 @@ class ChatGPTClient:
                 next_state = self._state_from_payload(data, current_url=str(r.url) or self.BASE)
                 self._log(f"账号创建成功 {describe_flow_state(next_state)}")
                 return (True, next_state) if return_state else (True, "账号创建成功")
-            else:
-                error_msg = r.text[:200]
-                self._log(f"创建失败: {r.status_code} - {error_msg}")
-                return False, f"HTTP {r.status_code}"
+
+            error_msg = r.text[:200]
+            error_code = ""
+            try:
+                error_payload = r.json() or {}
+                error_code = str(((error_payload.get("error") or {}).get("code")) or "").strip()
+            except Exception:
+                error_payload = {}
+
+            if r.status_code == 400 and error_code == "user_already_exists":
+                self._log("create_account 命中 user_already_exists，判定该邮箱已进入 existing-account 分叉")
+                return False, "user_already_exists"
+
+            self._log(f"创建失败: {r.status_code} - {error_msg}")
+            return False, f"HTTP {r.status_code}"
                 
         except Exception as e:
             self._log(f"创建异常: {e}")
@@ -901,6 +912,8 @@ class ChatGPTClient:
                     return_state=True,
                 )
                 if not success:
+                    if next_state == "user_already_exists":
+                        return False, "existing_account_after_about_you:user_already_exists"
                     return False, f"创建账号失败: {next_state}"
                 account_created = True
                 state = next_state
