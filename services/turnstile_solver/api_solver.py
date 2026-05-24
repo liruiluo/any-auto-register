@@ -17,7 +17,10 @@ except ImportError:
 try:
     from patchright.async_api import async_playwright
 except ImportError:
-    async_playwright = None
+    try:
+        from playwright.async_api import async_playwright
+    except ImportError:
+        async_playwright = None
 from db_results import init_db, save_result, load_result, cleanup_old_results
 from browser_configs import browser_config
 from rich.console import Console
@@ -622,9 +625,17 @@ class TurnstileAPIServer:
                 logger.debug(f"Browser {index}: Injected new CAPTCHA widget with sitekey: {websiteKey}")
         return result
 
-    async def _solve_turnstile(self, task_id: str, url: str, sitekey: str, action: Optional[str] = None, cdata: Optional[str] = None):
+    async def _solve_turnstile(
+        self,
+        task_id: str,
+        url: str,
+        sitekey: str,
+        action: Optional[str] = None,
+        cdata: Optional[str] = None,
+        proxy: Optional[str] = None,
+    ):
         """Solve the Turnstile challenge."""
-        proxy = None
+        selected_proxy = str(proxy or "").strip() or None
 
         index, browser, browser_config = await self.browser_pool.get()
         
@@ -639,7 +650,11 @@ class TurnstileAPIServer:
             if self.debug:
                 logger.warning(f"Browser {index}: Cannot check browser state: {str(e)}")
 
-        if self.proxy_support:
+        proxy = selected_proxy
+        if proxy and self.debug:
+            logger.debug(f"Browser {index}: Using request proxy: {proxy}")
+
+        if not proxy and self.proxy_support:
             proxy_file_path = os.path.join(os.getcwd(), "proxies.txt")
 
             try:
@@ -660,81 +675,72 @@ class TurnstileAPIServer:
                 logger.error(f"Error reading proxy file: {str(e)}")
                 proxy = None
 
-            if proxy:
-                if '@' in proxy:
-                    try:
-                        scheme_part, auth_part = proxy.split('://')
-                        auth, address = auth_part.split('@')
-                        username, password = auth.split(':')
-                        ip, port = address.split(':')
-                        if self.debug:
-                            logger.debug(f"Browser {index}: Creating context with proxy {scheme_part}://{ip}:{port} (auth: {username}:***)")
-                        context_options = {
-                            "proxy": {
-                                "server": f"{scheme_part}://{ip}:{port}",
-                                "username": username,
-                                "password": password
-                            },
-                            "user_agent": browser_config['useragent']
-                        }
-                        
-                        if browser_config['sec_ch_ua'] and browser_config['sec_ch_ua'].strip():
-                            context_options['extra_http_headers'] = {
-                                'sec-ch-ua': browser_config['sec_ch_ua']
-                            }
-                        
-                        context = await browser.new_context(**context_options)
-                    except ValueError:
-                        raise ValueError(f"Invalid proxy format: {proxy}")
-                else:
-                    parts = proxy.split(':')
-                    if len(parts) == 5:
-                        proxy_scheme, proxy_ip, proxy_port, proxy_user, proxy_pass = parts
-                        if self.debug:
-                            logger.debug(f"Browser {index}: Creating context with proxy {proxy_scheme}://{proxy_ip}:{proxy_port} (auth: {proxy_user}:***)")
-                        context_options = {
-                            "proxy": {
-                                "server": f"{proxy_scheme}://{proxy_ip}:{proxy_port}",
-                                "username": proxy_user,
-                                "password": proxy_pass
-                            },
-                            "user_agent": browser_config['useragent']
-                        }
-                        
-                        if browser_config['sec_ch_ua'] and browser_config['sec_ch_ua'].strip():
-                            context_options['extra_http_headers'] = {
-                                'sec-ch-ua': browser_config['sec_ch_ua']
-                            }
-                        
-                        context = await browser.new_context(**context_options)
-                    elif len(parts) == 3:
-                        if self.debug:
-                            logger.debug(f"Browser {index}: Creating context with proxy {proxy}")
-                        context_options = {
-                            "proxy": {"server": f"{proxy}"},
-                            "user_agent": browser_config['useragent']
-                        }
-                        
-                        if browser_config['sec_ch_ua'] and browser_config['sec_ch_ua'].strip():
-                            context_options['extra_http_headers'] = {
-                                'sec-ch-ua': browser_config['sec_ch_ua']
-                            }
-                        
-                        context = await browser.new_context(**context_options)
-                    else:
-                        raise ValueError(f"Invalid proxy format: {proxy}")
-            else:
-                if self.debug:
-                    logger.debug(f"Browser {index}: Creating context without proxy")
-                context_options = {"user_agent": browser_config['useragent']}
-                
-                if browser_config['sec_ch_ua'] and browser_config['sec_ch_ua'].strip():
-                    context_options['extra_http_headers'] = {
-                        'sec-ch-ua': browser_config['sec_ch_ua']
+        if proxy:
+            if '@' in proxy:
+                try:
+                    scheme_part, auth_part = proxy.split('://')
+                    auth, address = auth_part.split('@')
+                    username, password = auth.split(':')
+                    ip, port = address.split(':')
+                    if self.debug:
+                        logger.debug(f"Browser {index}: Creating context with proxy {scheme_part}://{ip}:{port} (auth: {username}:***)")
+                    context_options = {
+                        "proxy": {
+                            "server": f"{scheme_part}://{ip}:{port}",
+                            "username": username,
+                            "password": password
+                        },
+                        "user_agent": browser_config['useragent']
                     }
-                
-                context = await browser.new_context(**context_options)
+                    
+                    if browser_config['sec_ch_ua'] and browser_config['sec_ch_ua'].strip():
+                        context_options['extra_http_headers'] = {
+                            'sec-ch-ua': browser_config['sec_ch_ua']
+                        }
+                    
+                    context = await browser.new_context(**context_options)
+                except ValueError:
+                    raise ValueError(f"Invalid proxy format: {proxy}")
+            else:
+                parts = proxy.split(':')
+                if len(parts) == 5:
+                    proxy_scheme, proxy_ip, proxy_port, proxy_user, proxy_pass = parts
+                    if self.debug:
+                        logger.debug(f"Browser {index}: Creating context with proxy {proxy_scheme}://{proxy_ip}:{proxy_port} (auth: {proxy_user}:***)")
+                    context_options = {
+                        "proxy": {
+                            "server": f"{proxy_scheme}://{proxy_ip}:{proxy_port}",
+                            "username": proxy_user,
+                            "password": proxy_pass
+                        },
+                        "user_agent": browser_config['useragent']
+                    }
+                    
+                    if browser_config['sec_ch_ua'] and browser_config['sec_ch_ua'].strip():
+                        context_options['extra_http_headers'] = {
+                            'sec-ch-ua': browser_config['sec_ch_ua']
+                        }
+                    
+                    context = await browser.new_context(**context_options)
+                elif len(parts) == 3:
+                    if self.debug:
+                        logger.debug(f"Browser {index}: Creating context with proxy {proxy}")
+                    context_options = {
+                        "proxy": {"server": f"{proxy}"},
+                        "user_agent": browser_config['useragent']
+                    }
+                    
+                    if browser_config['sec_ch_ua'] and browser_config['sec_ch_ua'].strip():
+                        context_options['extra_http_headers'] = {
+                            'sec-ch-ua': browser_config['sec_ch_ua']
+                        }
+                    
+                    context = await browser.new_context(**context_options)
+                else:
+                    raise ValueError(f"Invalid proxy format: {proxy}")
         else:
+            if self.debug:
+                logger.debug(f"Browser {index}: Creating context without proxy")
             context_options = {"user_agent": browser_config['useragent']}
             
             if browser_config['sec_ch_ua'] and browser_config['sec_ch_ua'].strip():
@@ -954,6 +960,7 @@ class TurnstileAPIServer:
         sitekey = request.args.get('sitekey')
         action = request.args.get('action')
         cdata = request.args.get('cdata')
+        proxy = request.args.get('proxy')
 
         if not url or not sitekey:
             return jsonify({
@@ -969,11 +976,21 @@ class TurnstileAPIServer:
             "url": url,
             "sitekey": sitekey,
             "action": action,
-            "cdata": cdata
+            "cdata": cdata,
+            "proxy": proxy,
         })
 
         try:
-            asyncio.create_task(self._solve_turnstile(task_id=task_id, url=url, sitekey=sitekey, action=action, cdata=cdata))
+            asyncio.create_task(
+                self._solve_turnstile(
+                    task_id=task_id,
+                    url=url,
+                    sitekey=sitekey,
+                    action=action,
+                    cdata=cdata,
+                    proxy=proxy,
+                )
+            )
 
             if self.debug:
                 logger.debug(f"Request completed with taskid {task_id}.")

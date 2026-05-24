@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 Token 刷新模块
 支持 Session Token 和 OAuth Refresh Token 两种刷新方式
@@ -59,7 +61,31 @@ class TokenRefreshManager:
         session = cffi_requests.Session(impersonate="chrome120", proxy=self.proxy_url)
         return session
 
-    def refresh_by_session_token(self, session_token: str) -> TokenRefreshResult:
+    def _cookie_header_from_input(self, cookies: Any) -> str:
+        if not cookies:
+            return ""
+        if isinstance(cookies, str):
+            return cookies.strip()
+        if isinstance(cookies, dict):
+            if cookies.get("cookie_header"):
+                return str(cookies.get("cookie_header") or "").strip()
+            parts = []
+            for key, value in cookies.items():
+                if not key or value in (None, ""):
+                    continue
+                if key in {"cookies", "compact"} and isinstance(value, dict):
+                    for sub_key, sub_value in value.items():
+                        if sub_key and sub_value not in (None, ""):
+                            parts.append(f"{sub_key}={sub_value}")
+                    continue
+                if key == "cookie_names":
+                    continue
+                if isinstance(value, (str, int, float)):
+                    parts.append(f"{key}={value}")
+            return "; ".join(parts)
+        return ""
+
+    def refresh_by_session_token(self, session_token: str, cookies: Any = None) -> TokenRefreshResult:
         """
         使用 Session Token 刷新
 
@@ -73,21 +99,30 @@ class TokenRefreshManager:
 
         try:
             session = self._create_session()
-
-            # 设置会话 Cookie
-            session.cookies.set(
-                "__Secure-next-auth.session-token",
-                session_token,
-                domain=".chatgpt.com",
-                path="/"
-            )
+            cookie_header = self._cookie_header_from_input(cookies)
+            if "__Secure-next-auth.session-token=" not in cookie_header and session_token:
+                cookie_header = (
+                    f"__Secure-next-auth.session-token={session_token}"
+                    if not cookie_header
+                    else f"__Secure-next-auth.session-token={session_token}; {cookie_header}"
+                )
+            if not cookie_header and session_token:
+                session.cookies.set(
+                    "__Secure-next-auth.session-token",
+                    session_token,
+                    domain=".chatgpt.com",
+                    path="/"
+                )
 
             # 请求会话端点
             response = session.get(
                 self.SESSION_URL,
                 headers={
                     "accept": "application/json",
-                    "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                    "origin": "https://chatgpt.com",
+                    "referer": "https://chatgpt.com/",
+                    "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    **({"cookie": cookie_header} if cookie_header else {}),
                 },
                 timeout=30
             )
@@ -218,7 +253,10 @@ class TokenRefreshManager:
         # 优先尝试 Session Token
         if account.session_token:
             logger.info(f"尝试使用 Session Token 刷新账号 {account.email}")
-            result = self.refresh_by_session_token(account.session_token)
+            result = self.refresh_by_session_token(
+                account.session_token,
+                getattr(account, "cookies", None),
+            )
             if result.success:
                 return result
             logger.warning(f"Session Token 刷新失败，尝试 OAuth 刷新")

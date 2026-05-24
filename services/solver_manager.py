@@ -13,6 +13,10 @@ _log_file = None
 _lock = threading.Lock()
 
 
+def get_solver_browser_type() -> str:
+    return os.getenv("ANY_AUTO_REGISTER_SOLVER_BROWSER", "chromium").strip() or "chromium"
+
+
 def is_running() -> bool:
     try:
         r = requests.get(f"{SOLVER_URL}/", timeout=2)
@@ -40,7 +44,7 @@ def start():
                 "-u",
                 solver_script,
                 "--browser_type",
-                "camoufox",
+                get_solver_browser_type(),
                 "--port",
                 str(SOLVER_PORT),
             ],

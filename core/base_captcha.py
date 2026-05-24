@@ -4,7 +4,13 @@ from abc import ABC, abstractmethod
 
 class BaseCaptcha(ABC):
     @abstractmethod
-    def solve_turnstile(self, page_url: str, site_key: str) -> str:
+    def solve_turnstile(
+        self,
+        page_url: str,
+        site_key: str,
+        action: str = "",
+        cdata: str = "",
+    ) -> str:
         """返回 Turnstile token"""
         ...
 
@@ -19,7 +25,13 @@ class YesCaptcha(BaseCaptcha):
         self.client_key = client_key
         self.api = "https://api.yescaptcha.com"
 
-    def solve_turnstile(self, page_url: str, site_key: str) -> str:
+    def solve_turnstile(
+        self,
+        page_url: str,
+        site_key: str,
+        action: str = "",
+        cdata: str = "",
+    ) -> str:
         import requests, time, urllib3
         urllib3.disable_warnings()
         r = requests.post(f"{self.api}/createTask", json={
@@ -47,7 +59,13 @@ class YesCaptcha(BaseCaptcha):
 
 class ManualCaptcha(BaseCaptcha):
     """人工打码，阻塞等待用户输入"""
-    def solve_turnstile(self, page_url: str, site_key: str) -> str:
+    def solve_turnstile(
+        self,
+        page_url: str,
+        site_key: str,
+        action: str = "",
+        cdata: str = "",
+    ) -> str:
         return input(f"请手动获取 Turnstile token ({page_url}): ").strip()
 
     def solve_image(self, image_b64: str) -> str:
@@ -57,15 +75,29 @@ class ManualCaptcha(BaseCaptcha):
 class LocalSolverCaptcha(BaseCaptcha):
     """调用本地 api_solver 服务解 Turnstile（Camoufox/patchright）"""
 
-    def __init__(self, solver_url: str = "http://localhost:8889"):
+    def __init__(self, solver_url: str = "http://localhost:8889", proxy: str = ""):
         self.solver_url = solver_url.rstrip("/")
+        self.proxy = str(proxy or "").strip()
 
-    def solve_turnstile(self, page_url: str, site_key: str) -> str:
+    def solve_turnstile(
+        self,
+        page_url: str,
+        site_key: str,
+        action: str = "",
+        cdata: str = "",
+    ) -> str:
         import requests, time
+        params = {"url": page_url, "sitekey": site_key}
+        if action:
+            params["action"] = action
+        if cdata:
+            params["cdata"] = cdata
+        if self.proxy:
+            params["proxy"] = self.proxy
         # 提交任务
         r = requests.get(
             f"{self.solver_url}/turnstile",
-            params={"url": page_url, "sitekey": site_key},
+            params=params,
             timeout=15,
         )
         r.raise_for_status()
@@ -82,6 +114,9 @@ class LocalSolverCaptcha(BaseCaptcha):
             )
             if res.status_code == 200:
                 data = res.json()
+                if data.get("errorId") not in (None, 0):
+                    detail = data.get("errorDescription") or data.get("errorCode") or "unknown error"
+                    raise RuntimeError(f"LocalSolver Turnstile 失败: {detail}")
                 status = data.get("status")
                 if status == "ready":
                     token = data.get("solution", {}).get("token")
